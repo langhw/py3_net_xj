@@ -1,0 +1,16 @@
+show version
+show clock
+show boot
+show platform
+show processes cpu
+show processes memory sorted
+show environment
+show ip interface brief
+show interfaces summary 
+show ip route
+show ip route summary
+show ip ospf neighbor
+show ip ospf neighbor summary
+show running-config
+show flash: all
+show logging

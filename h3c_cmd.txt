@@ -1,0 +1,15 @@
+display version
+display clock
+display device
+display cpu-usage
+display memory
+display environment
+display irf
+display ip interface brief
+display interface brief
+display ip routing-table
+display ip routing-table summary
+display ospf peer
+display ip ospf neighbor summary
+display current-configuration
+display logbuffer
