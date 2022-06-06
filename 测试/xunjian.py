@@ -47,7 +47,6 @@ class BackupConfig(object):
 				             'device_type': row[8].value,
 				             # 'cmd_list': self.get_cmd_info(wb[row[8].value.strip().lower()]),
 				             }
-				print(info_dict)
 				yield info_dict
 				# yield info_dict
 				# 方法2:pandas
@@ -71,5 +70,9 @@ class BackupConfig(object):
 		pass
 if __name__=='__main__':
 	# 执行主程序
-	print(BackupConfig().get_device_info())
+	go = BackupConfig().get_device_info()
+	print(go.__next__())
+	print(go.__next__())
+	print(go.__next__())
+	print(go.__next__())
 	# BackupConfig().connect()
