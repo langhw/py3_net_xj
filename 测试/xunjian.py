@@ -1,29 +1,35 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # @Time    : 2022/6/6 20:10
-# @Author  : lianghongwei
+# @Author  :
 # @File    : xunjian.py
 # @Software: PyCharm
 # @Description :
 
-import openpyxl, pandas
+import logging
+# import openpyxl
+import pandas
+from openpyxl.reader.excel import load_workbook
+from netmiko import ConnectHandler
+from netmiko.ssh_exception import (NetMikoTimeoutException, AuthenticationException, SSHException)
+from multiprocessing.pool import ThreadPool
+from datetime import datetime
 
 class BackupConfig(object):
 	def __init__(self):
 		"""初始参数"""
 		self.device_file = '设备信息表.xlsx'
-
+		self.pool = ThreadPool(10)
 	def load_excel(self):
 		"""
 		加载excel文件
 		:return:
 		"""
 		try:
-			wb = openpyxl.load_workbook(self.device_file)
+			wb = load_workbook(self.device_file)
 			return wb
 		except FileNotFoundError:
 			print('{}文件不存在'.format(self.device_file))
-
 	def get_device_info(self):
 		"""
 		获取设备基本信息：
@@ -45,10 +51,9 @@ class BackupConfig(object):
 				             'password': row[6].value,
 				             'secret': row[7].value,
 				             'device_type': row[8].value,
-				             # 'cmd_list': self.get_cmd_info(wb[row[8].value.strip().lower()]),
+				             'cmd_list': self.get_cmd_info(wb[row[8].value.strip().lower()]),
 				             }
 				yield info_dict
-				# yield info_dict
 				# 方法2:pandas
 				# names = ['comment', 'ip', 'protocol', 'port', 'username', 'password', 'secret', 'device_type']
 				# df = pandas.read_excel(self.device_file, usecols='B:I', names=names, keep_default_na=False )
@@ -60,19 +65,107 @@ class BackupConfig(object):
 			print('Error:', e)
 		finally:
 			wb.close()
-	def get_cmd_info(self):
-		pass
-	def run_cmd(self):
-		pass
+	def get_cmd_info(self, cmd_sheet):
+		"""获取命令信息，返回所有命令列表"""
+		cmd_list = []
+		try:
+			for row in cmd_sheet.iter_rows(min_row=2, max_col=2):
+				if str(row[0].value).strip() != '#' and row[1].value:
+					# 跳过注释行，去掉命令左右空白
+					cmd_list.append(row[1].value.strip())
+			return cmd_list
+		except Exception as e:
+			print('get_cmd_info Error: ', e)
+	def connectHandler(self, host):
+		"""定义一个netmiko对象"""
+		try:
+			connect = ''
+			# 判断使用ssh协议
+			if host['protocol'].lower().strip() == 'ssh':
+				host['port'] = host['port'] if (host['port'] not in [22, None]) else 22
+				host.pop('protocol'), host.pop('cmd_list')
+				if 'huawei' in host['device_type']:
+					# 华为超时设置为15秒
+					connect = ConnectHandler(**host, conn_timeout=15)
+				# elif 'fortinet' in host['device_type']:
+					# 调用重写的MyFortinetSSH类
+					# connect = MyFortinetSSH(**host)
+				else:
+					connect = ConnectHandler(**host)
+			#判断使用telnet协议
+			elif host['protocol'].lower().strip() == 'telnet':
+				host['port'] = host['port'] if (host['port'] not in [23, None]) else 23
+				host.pop('protocol'), host.pop('cmd_list')
+				# netmiko里面支持telnet协议，设备类型格式加_telnet
+				host['device_type'] = host['device_type'] + '_telnet'
+				# fast_cli=False ，修复Telnet login authentication 报错。
+				connect = ConnectHandler(**host, fast_cli=False)
+			# 不支持的协议
+			else:
+				res = '{} 暂不支持{}协议！'.format(host['ip'], host['protocol'])
+				raise ValueError(res)
+			return connect
+		# 捕获异常
+		except NetMikoTimeoutException as e:
+			res = 'Failed......{} 连通性问题！'.format(host['ip'])
+			print(res)
+		except AuthenticationException as e:
+			res = 'Failed......{} 用户名或密码错误！'.format(host['ip'])
+			print(res)
+		except SSHException as e:
+			res = 'Failed......{} SSH版本不兼容！'.format(host['ip'])
+			print(res)
+			pass
+		except Exception as e:
+			print('connectHandler Failed: {}'.format(e))
+	def run_cmd(self, host, cmds, enable=False):
+		"""执行命令，保存信息"""
+		# 特权功能标识位
+		enable = True if host['secret'] else False
+		try:
+			conn = self.connectHandler(host)
+			if conn:
+				# 获取到设备名称，不同人或不同厂商命名都会有些特殊，按需优化
+				hostname = conn.find_prompt()
+				if cmds:
+					# 判断命令为真的条件
+					output = ''
+					for cmd in cmds:
+						if enable:
+							# 进入特权模式
+							conn.enable()
+							output += conn.send_command(cmd, strip_command=False, strip_prompt=False)
+							print(output)
+						else:
+							output += conn.send_command(cmd, strip_command=False, strip_prompt=False)
+							print(output)
+				else:
+					# 拓展用于ftp/sftp/scp备份使用
+					pass
+				# 最后关闭会话
+				conn.disconnect()
+		except Exception as e:
+			print(f'run_cmd Failed: {e}')
 	def connect_test(self):
 		pass
 	def connect(self):
-		pass
+		"""主程序"""
+		start_time = datetime.now()
+		#hosts 是一个生成器，需要for循环进行遍历
+		hosts = self.get_device_info()
+		for host in hosts:
+			self.run_cmd(host, host['cmd_list'])
+		# 	self.pool.apply_async(self.run_cmd, args=(host, host['cmd_list']))
+		# self.pool.close()
+		# self.pool.join()
+		end_time = datetime.now()
+		print('>>>>所有已经执行完成，总共耗时{:0.2f}秒.<<<'.format((end_time - start_time).total_seconds()))
 if __name__=='__main__':
 	# 执行主程序
-	go = BackupConfig().get_device_info()
-	print(go.__next__())
-	print(go.__next__())
-	print(go.__next__())
-	print(go.__next__())
+	# go = BackupConfig().get_device_info()
+	# print(go.__next__())
+	# print(go.__next__())
+	# print(go.__next__())
+	# print(go.__next__())
 	# BackupConfig().connect()
+	BackupConfig().connect()
