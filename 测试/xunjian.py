@@ -22,7 +22,8 @@ class BackupConfig(object):
 		"""初始参数"""
 		self.device_file = '设备信息表.xlsx'
 		self.pool = ThreadPool(10)
-		self.log = os.mkdir('LOG') if os.path.exists('LOG') == False else 'LOG'
+		self.log ='LOG'
+		if not os.path.exists(self.log): os.mkdir(self.log)
 		self.logtime = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 	def write_to_file(self, *args, **kwargs):
 		"""将结果写入文件"""
@@ -211,10 +212,10 @@ class BackupConfig(object):
 		#hosts 是一个生成器，需要for循环进行遍历
 		hosts = self.get_device_info()
 		for host in hosts:
-			self.run_cmd(host, host['cmd_list'])
-		# 	self.pool.apply_async(self.run_cmd, args=(host, host['cmd_list']))
-		# self.pool.close()
-		# self.pool.join()
+			# self.run_cmd(host, host['cmd_list'])
+			self.pool.apply_async(self.run_cmd, args=(host, host['cmd_list']))
+		self.pool.close()
+		self.pool.join()
 		end_time = datetime.now()
 		print('-' * 50)
 		print('>>>>所有已经执行完成，总共耗时{:0.2f}秒.<<<'.format((end_time - start_time).total_seconds()))
@@ -222,13 +223,6 @@ if __name__=='__main__':
 	# debug定位问题
 	# logging.basicConfig(filename='debug.log', level=logging.DEBUG)
 	# logging.getLogger('netmiko')
-	# 测试
-	# go = BackupConfig().get_device_info()
-	# print(go.__next__())
-	# print(go.__next__())
-	# print(go.__next__())
-	# print(go.__next__())
-	# BackupConfig().connect()
 	# 执行主程序
 	BackupConfig().connect()
 	# 连接测试
