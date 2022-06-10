@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # @Time    : 2022/6/6 20:10
-# @Author  :
 # @File    : xunjian.py
 # @Software: PyCharm
 # @Description :
@@ -17,15 +16,15 @@ from netmiko.ssh_exception import (NetMikoTimeoutException, AuthenticationExcept
 from multiprocessing.pool import ThreadPool
 from datetime import datetime
 
-class BackupConfig(object):
+class XunJian(object):
 	def __init__(self):
 		"""初始参数"""
 		self.device_file = '设备信息表.xlsx'
 		self.pool = ThreadPool(10)
-		self.log ='LOG'
+		self.log ='XJJG'
 		if not os.path.exists(self.log): os.mkdir(self.log)
 		self.logtime = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-	def write_to_file(self, *args, **kwargs):
+	def write_to_file(self, **kwargs):
 		"""将结果写入文件"""
 		if kwargs['state'] == 1:
 			# 将正常的写入文件
@@ -224,7 +223,7 @@ if __name__=='__main__':
 	# logging.basicConfig(filename='debug.log', level=logging.DEBUG)
 	# logging.getLogger('netmiko')
 	# 执行主程序
-	BackupConfig().connect()
+	XunJian().connect()
 	# 连接测试
-	# BackupConfig().connect_t()
+	# XunJian().connect_t()
 	# input("Press <enter> to quit")
