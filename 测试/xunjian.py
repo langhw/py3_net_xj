@@ -8,6 +8,8 @@
 
 import logging
 # import openpyxl
+import os.path
+
 import pandas
 from openpyxl.reader.excel import load_workbook
 from netmiko import ConnectHandler
@@ -19,7 +21,25 @@ class BackupConfig(object):
 	def __init__(self):
 		"""初始参数"""
 		self.device_file = '设备信息表.xlsx'
-		self.pool = ThreadPool(10)
+		self.pool = ThreadPool(2)
+		self.log = os.mkdir('LOG') if os.path.exists('LOG') == False else 'LOG'
+		self.logtime = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+	def write_to_file(self, *args, **kwargs):
+		"""将结果写入文件"""
+		if kwargs['state'] == 1:
+			# 将正常的写入文件
+			with open(kwargs['path'], 'a') as f:
+				f.write(kwargs['result'])
+		elif kwargs['state'] == 2:
+			# 连接测试结果写入文件
+			with open(os.path.join(self.log, f'connect_t_{self.logtime}.log'), 'a') as f:
+				f.write(kwargs['result'])
+				f.write('\n')
+		else:
+			# 将异常的写入文件
+			with open(os.path.join(self.log, f'error_{self.logtime}.log'), 'a') as f:
+				f.write(kwargs['error'])
+				f.write('\n')
 	def load_excel(self):
 		"""
 		加载excel文件
@@ -107,65 +127,111 @@ class BackupConfig(object):
 			return connect
 		# 捕获异常
 		except NetMikoTimeoutException as e:
-			res = 'Failed......{} 连通性问题！'.format(host['ip'])
+			res = 'Failed......{:<15} 连通性问题！'.format(host['ip'])
 			print(res)
+			self.write_to_file(**{'state': 0, 'error': str(res)})
 		except AuthenticationException as e:
 			res = 'Failed......{} 用户名或密码错误！'.format(host['ip'])
 			print(res)
+			self.write_to_file(**{'state': 0, 'error': str(res)})
 		except SSHException as e:
 			res = 'Failed......{} SSH版本不兼容！'.format(host['ip'])
 			print(res)
-			pass
+			self.write_to_file(**{'state': 0, 'error': str(res)})
 		except Exception as e:
 			print('connectHandler Failed: {}'.format(e))
+			self.write_to_file(**{'state': 0, 'error': str(res)})
 	def run_cmd(self, host, cmds, enable=False):
 		"""执行命令，保存信息"""
 		# 特权功能标识位
 		enable = True if host['secret'] else False
+		conn = self.connectHandler(host)
+		if conn:
+			# 获取到设备名称，不同人或不同厂商命名都会有些特殊，按需优化
+			hostname = conn.find_prompt()
+			dirname = host['ip'] + '_' + hostname
+			dirpath = os.path.join(self.log, self.logtime, dirname)
+			# 逐级创建目录
+			try:
+				os.makedirs(dirpath)
+			except:
+				raise Exception('文件夹创建失败！')
+		try:
+			if cmds:
+				# 判断命令为真的条件
+				for cmd in cmds:
+					print(cmd)
+					if enable:
+						# 进入特权模式
+						conn.enable()
+						# output += conn.send_command(cmd, strip_command=False, strip_prompt=False)
+						output = conn.send_command(cmd, strip_command=False, strip_prompt=False)
+						# print(output)
+						data = {'state': 1, 'result': output, 'path': os.path.join(dirpath, cmd + '.conf')}
+						self.write_to_file(**data)
+					else:
+						# output += conn.send_command(cmd, strip_command=False, strip_prompt=False)
+						output = conn.send_command(cmd, strip_command=False, strip_prompt=False)
+						print(output)
+						data = {'state': 1, 'result': output, 'path': os.path.join(dirpath, cmd + '.conf')}
+						self.write_to_file(**data)
+			else:
+				# 拓展用于ftp/sftp/scp备份使用
+				pass
+			# 最后关闭会话
+			conn.disconnect()
+		except Exception as e:
+			print(f'run_cmd Failed: {e}')
+		finally:
+			pass
+	def run_t(self, host):
+		"""仅执行命令"""
 		try:
 			conn = self.connectHandler(host)
 			if conn:
-				# 获取到设备名称，不同人或不同厂商命名都会有些特殊，按需优化
+				# 获取到设备名称
 				hostname = conn.find_prompt()
-				if cmds:
-					# 判断命令为真的条件
-					output = ''
-					for cmd in cmds:
-						if enable:
-							# 进入特权模式
-							conn.enable()
-							output += conn.send_command(cmd, strip_command=False, strip_prompt=False)
-							print(output)
-						else:
-							output += conn.send_command(cmd, strip_command=False, strip_prompt=False)
-							print(output)
-				else:
-					# 拓展用于ftp/sftp/scp备份使用
-					pass
-				# 最后关闭会话
+				output = '获取的设备提示符：{}'.format((hostname))
+				print(output)
+				self.write_to_file(**{'state': 2, 'result': output})
+				# 关闭会话
 				conn.disconnect()
 		except Exception as e:
-			print(f'run_cmd Failed: {e}')
-	def connect_test(self):
-		pass
+			print(f'run_cmd Failed:{e}')
+	def connect_t(self):
+		"""连接测试"""
+		start_time = datetime.now()
+		hosts = self.get_device_info()
+		for host in hosts:
+			self.pool.apply_async(self.run_t, args=(host,))
+		self.pool.close()
+		self.pool.join()
+		end_time = datetime.now()
+		print('>>>>所有连接测试已经执行完成，总共耗时{:0.2f}秒.<<<'.format((end_time - start_time).total_seconds()))
 	def connect(self):
 		"""主程序"""
 		start_time = datetime.now()
 		#hosts 是一个生成器，需要for循环进行遍历
 		hosts = self.get_device_info()
 		for host in hosts:
-			self.run_cmd(host, host['cmd_list'])
-		# 	self.pool.apply_async(self.run_cmd, args=(host, host['cmd_list']))
-		# self.pool.close()
-		# self.pool.join()
+			# self.run_cmd(host, host['cmd_list'])
+			self.pool.apply_async(self.run_cmd, args=(host, host['cmd_list']))
+		self.pool.close()
+		self.pool.join()
 		end_time = datetime.now()
 		print('>>>>所有已经执行完成，总共耗时{:0.2f}秒.<<<'.format((end_time - start_time).total_seconds()))
 if __name__=='__main__':
-	# 执行主程序
+	# debug定位问题
+	# logging.basicConfig(filename='debug.log', level=logging.DEBUG)
+	# logging.getLogger('netmiko')
+	# 测试
 	# go = BackupConfig().get_device_info()
 	# print(go.__next__())
 	# print(go.__next__())
 	# print(go.__next__())
 	# print(go.__next__())
 	# BackupConfig().connect()
+	# 执行主程序
 	BackupConfig().connect()
+	# 连接测试
+	# BackupConfig().connect_t()
